@@ -1,0 +1,177 @@
+<html>
+  <head>
+    <title>Understanding 3D Object Interaction from a Single Image</title>
+    <meta property="og:title" content="Understanding 3D Object Interaction from a Single Image"/>
+    <meta property="og:image" content="teaser.png"/>
+    <meta property="og:description" content="S. Qian, D. F. Fouhey." />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    
+    <!-- webpage template-->
+    <link rel="stylesheet" href="website.css">  
+  </head>
+  <body>
+    <br>
+    <center>
+      <span style="font-size:38px">Understanding 3D Object Interaction from a Single Image</span>
+    </center>
+    <br><br>
+    <table align=center width=400px>
+      <tr>
+        <td align=center width=100px>
+          <center>
+            <span style="font-size:20px"><a href="https://jasonqsy.github.io/">Shengyi Qian</a></span>
+          </center>
+        </td>
+        <td align=center width=100px>
+          <center>
+            <span style="font-size:20px"><a href="https://web.eecs.umich.edu/~fouhey/">David F. Fouhey</a></span>
+          </center>
+        </td>
+      </tr>
+    </table>
+    <br>
+    <table align=center width=700px>
+      <tr>
+        <td align=center width=200px>
+          <center>
+            <span style="font-size:20px">University of Michigan</span>
+          </center>
+        </td>
+      </tr>
+    </table>
+    <br>
+    <table align=center width=700px>
+      <tr>
+        <td align=center width=100px>
+          <center>
+            <span style="font-size:20px">arXiv 2023</span>
+          </center>
+        </td>
+      </tr>
+    </table>
+    <br>
+    <table align=center width=500px>
+      <tr>
+        <td align=center width=100px>
+          <center>
+            <span style="font-size:20px"><a href="https://arxiv.org/abs/2203.16531">[pdf]</a></span>
+          </center>
+        </td>
+        <td align=center width=100px>
+          <center>
+            <span style="font-size:20px"><a href="https://github.com/JasonQSY/3doi">[code]</a></span>
+          </center>
+        </td>
+        <td align=center width=100px>
+          <center>
+            <span style="font-size:20px"><a href="https://www.youtube.com/watch?v=yUptXNEMS6g">[video]</a></span>
+          </center>
+        </td>
+      </tr>
+    </table>
+    <table align=center width=700px>
+      <tr>
+        <td align=center width=100px>
+          <center>
+            <span style="font-size:20px"></span>
+          </center>
+        </td>
+      </tr>
+    </table>
+    <br>
+    <table align=center width=900px>
+      <tr>
+        <td width=00px>
+          <center>
+            <img src = "teaser.png" width="900px"></img><br>
+          </center>
+        </td>
+      </tr>
+      <!-- <td width=600px>
+        <center>
+          <span style="font-size:14px"><i>Given an ordinary video, our system produces a 3D planar representation of the observed articulation. The 3D renderings illustrate how the microwave (in Pink) can be articulated in 3D space. We also show the predicted rotation axis using a Blue arrow.</i>
+        </center>
+      </td>
+      </tr> -->
+    </table>
+    <br>
+    Humans can easily understand a single image as depicting multiple potential objects permitting interaction. We use this skill to plan our interactions with the world and accelerate understanding new objects without engaging in interaction. In this paper, we would like to endow machines with the similar ability, so that intelligent agents can better explore the 3D scene or manipulate objects. Our approach is a transformer-based model that predicts the 3D location, physical properties and affordance of objects. To power this model, we collect a dataset with Internet videos, egocentric videos and indoor images to train and validate our approach. Our model yields strong performance on our data, and generalizes well to robotics data.
+    <br><br>
+    <hr>
+    <table align=center width=1100px>
+      <tr>
+        <td>
+          <left>
+            <center>
+              <h1>3D Object Interaction Dataset</h1>
+              <h3>Examples</h3>
+            </center>
+          </left>
+        </td>
+      </tr>
+    </table>
+    <table align=center width=1100px>
+      <tr>
+        <td>
+          <left>
+            <center>
+              <h3>Downloads</h3>
+            </center>
+          </left>
+        </td>
+      </tr>
+    </table>
+    <table id="customers" align=center width=1000px>
+      <tr>
+          <th width=14%>Category</th>
+          <th width=23%>Links</th>
+          <th>Details</th>
+      </tr>
+      <tr>
+          <td>Images</td>
+          <td>images.tar.gz</td>
+          <td>All images from Articulation, Epickitchen and Omnidata.</td>
+      </tr>
+      <tr>
+          <td>Annotations</td>
+          <td>annotations.tar.gz</td>
+          <td>Annotations for train, val and test split. The annotations of each split is stored in the pth file. Please check out our code about loading the data.</td>
+      </tr>
+    </table>
+    <br><br>
+    <hr>
+    <table align=center width=1100px>
+      <tr>
+        <td>
+          <left>
+            <center>
+              <h1>Results</h1>
+            </center>
+          </left>
+        </td>
+      </tr>
+    </table>
+    <center>
+    </center>
+    <br><br>
+    <hr>
+    <table align=center width=1100px>
+      <tr>
+        <td>
+          <left>
+            <center>
+              <h1>Acknowledgements</h1>
+            </center>
+            This work was supported by the DARPA Machine Common Sense Program and Toyota Research Institute. Toyota Research Institute (“TRI”) provided funds to assist the authors with their research but this article solely reflects the opinions and conclusions of its authors and not TRI or any other Toyota entity.
+          </left>
+        </td>
+      </tr>
+    </table>
+    <!-- Loads <model-viewer> for modern browsers: -->
+    <script type="module"
+      src="https://unpkg.com/@google/model-viewer@v0.9.0/dist/model-viewer.js"></script>
+    <!-- Loads <model-viewer> for old browsers like IE11: -->
+    <script nomodule
+      src="https://unpkg.com/@google/model-viewer@v0.9.0/dist/model-viewer-legacy.js"></script>
+  </body>
+</html>
