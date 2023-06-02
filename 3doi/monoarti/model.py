@@ -3,10 +3,6 @@ from functools import partial
 import torch
 
 from .transformer import INTR
-from .associative_embedding import AssociativeEmbeddingModel
-from .cohesive import CohesiveModel
-from .unet import UNet
-from .resnet_mlp import ResNetMLP
 from .sam_transformer import SamTransformer
 from .sam import ImageEncoderViT, MaskDecoder, PromptEncoder, TwoWayTransformer
 
@@ -125,42 +121,11 @@ def build_model(cfg: DictConfig):
             backbone_name=cfg.model.backbone_name,
             pixel_mean=[123.675, 116.28, 103.53],
             pixel_std=[58.395, 57.12, 57.375],
-        )
-    elif cfg.model.name == 'cohesive':
-        encoder = UNet(
-            arch='resnet50', 
-            pretrained=True, 
-            n_embedding=cfg.unet.n_embedding
-        )
-        model = CohesiveModel(
-            encoder=encoder,
-            image_size=cfg.data.image_size,
-            output_size=cfg.data.output_size,
-            fusion=cfg.model.fusion,
-            loss_mask_type=cfg.optimizer.loss_mask_type,
-        )
-    elif cfg.model.name == 'resnet_mlp':
-        model = ResNetMLP(
-            backbone_name=cfg.model.backbone_name,
+            sam_pretrained=cfg.model.sam_pretrained,
             image_size=cfg.data.image_size,
             num_queries=cfg.data.num_queries,
-            freeze_backbone=cfg.optimizer.freeze_backbone,
-            layers_movable=cfg.model.layers_movable,
-            layers_rigid=cfg.model.layers_rigid,
-            layers_kinematic=cfg.model.layers_kinematic,
-            layers_action=cfg.model.layers_action,
-            layers_axis=cfg.model.layers_axis,
-            layers_affordance=cfg.model.layers_affordance,
-            axis_bins=cfg.model.axis_bins,
-            depth_on=cfg.train.depth_on,
+            affordance_focal_alpha=cfg.optimizer.affordance_focal_alpha,
         )
-    elif cfg.model.name == 'ae':
-        encoder = UNet(
-            arch='resnet50', 
-            pretrained=True, 
-            n_embedding=cfg.unet.n_embedding
-        )
-        model = AssociativeEmbeddingModel(encoder)
     else:
         raise NotImplementedError
 

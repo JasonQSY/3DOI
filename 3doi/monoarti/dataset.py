@@ -2,43 +2,22 @@ from multiprocessing.sharedctypes import Value
 import os
 from typing import List, Optional, Tuple, Dict
 import warnings
-from tqdm import tqdm
 import numpy as np
-import requests
 from PIL import Image
-import pdb
 import random
 import socket
 import json
-import matplotlib.pyplot as plt
 import pycocotools.mask as mask_util
 
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
-#from detectron2.structures.masks import polygons_to_bitmask
 
 from .utils import gaussian_radius, draw_gaussian
 
 
-hostname = socket.gethostname()
-INITIAL_DATA_ROOT = '/home/syqian/datasets/monoarti_full'
-if hostname == 'teldrassil':
-    DEFAULT_DATA_ROOT = '/home/syqian/datasets/monoarti_data'
-    DEFAULT_DEPTH_ROOT = '/home/syqian/datasets/omnidata_filtered/depth_zbuffer/taskonomy'
-elif hostname.endswith('.arc-ts.umich.edu') or hostname.startswith('gl'):  # greatlakes or lighthouse
-    DEFAULT_DATA_ROOT = '/nfs/turbo/fouheyUnrep/syqian/monoarti_data'
-    DEFAULT_DEPTH_ROOT = '/nfs/turbo/fouheyTemp/jinlinyi/datasets/omnidata/omnidata_taskonomy/depth_zbuffer/taskonomy'
-elif hostname == 'newboxwhodis':
-    DEFAULT_DATA_ROOT = '/z/syqian/monoarti_data'
-elif hostname == 'titanic':
-    DEFAULT_DATA_ROOT = '/x/syqian/monoarti_data'
-    DEFAULT_DEPTH_ROOT = '/x/syqian/monoarti_data/omnidata_filtered/depth_zbuffer/taskonomy'
-elif hostname.startswith('ip'): # aws
-    DEFAULT_DATA_ROOT = '/home/ubuntu/monoarti_data'
-    DEFAULT_DEPTH_ROOT = '/home/ubuntu/monoarti_data/omnidata_filtered/depth_zbuffer/taskonomy'
-else:
-    raise ValueError("unknown host name {}!".format(hostname))
+DEFAULT_DATA_ROOT = '/home/ubuntu/monoarti_data'
+DEFAULT_DEPTH_ROOT = '/home/ubuntu/monoarti_data/omnidata_filtered/depth_zbuffer/taskonomy'
 
 
 def polygons_to_bitmask(polygons: List[np.ndarray], height: int, width: int) -> np.ndarray:
@@ -191,163 +170,9 @@ class DemoDataset(Dataset):
         return ret_entry
 
 
-
-class EDINADataset(Dataset):
+class InteractionDataset(Dataset):
     """
-    Egocentric Depth on everyday INdoor Activities (EDINA) Dataset.
-    https://github.com/tien-d/EgoDepthNormal/blob/main/README_dataset.md
-    """
-    def __init__(
-        self,
-        dataset_name,
-        entries: List, 
-        image_size,
-        output_size,
-        num_views: int = 1,
-        load_depth: bool = False,
-        affordance_radius: int = 5,
-        num_queries: int = 15,
-        bbox_to_mask: bool = False,
-    ):
-        """
-        Args:
-            entries: The list of dataset entries.
-        """
-        self._dataset_name = dataset_name
-        self._entries = entries
-        self._image_size = image_size
-        self._num_views = num_views
-        self._load_depth = load_depth
-        self._affordance_radius = affordance_radius
-        self._num_queries = num_queries
-        self._bbox_to_mask = bbox_to_mask
-
-        self.transforms = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
-
-    def __len__(self):
-        return len(self._entries)
-
-    def __getitem__(self, index):
-        entry = self._entries[index]
-
-        # read image
-        image_size = self._image_size
-        img_path = entry['img_path']
-        scene_id = img_path.split('/')[-3]
-        img_name = img_path.split('/')[-1]
-        img_name = scene_id + '_' + img_name
-
-        image = np.array(Image.open(img_path))
-        image = image[:, :, :3] #EDINA has 4 channels
-        image = self.transforms(image)
-
-        # read depth
-        # the format comes from:
-        # https://github.com/tien-d/EgoDepthNormal/blob/main/dataloaders/scannet_edina_dataloader.py
-        depth_path = entry['depth_path']
-        depth = np.array(Image.open(depth_path).convert('F')) / 1000.0
-        depth_invalid = (depth < 1e-5) | (depth > 10) # 10m
-        depth[depth_invalid] = - 1.0
-        depth = torch.FloatTensor(depth)
-
-        # fill in instances so that EDINA is compatible with our data
-        instances = entry['instances']
-        keypoint = []
-        movable = []
-        rigid = []
-        kinematic = []
-        action = []
-        affordance = []
-        #affordance_map = []
-        bbox = []
-        bbox_to_mask = []
-        axis = []
-        masks = []
-        valid = []
-
-        while len(valid) < self._num_queries:  # padding
-            valid.append(0.0)
-            keypoint.append(torch.LongTensor([0, 0]))
-            movable.append(torch.LongTensor([-100]))
-            rigid.append(torch.LongTensor([-100]))
-            kinematic.append(torch.LongTensor([-100]))
-            action.append(torch.LongTensor([-100]))
-            #affordance.append(torch.LongTensor([0, 0]))
-            affordance.append(torch.FloatTensor([0, 0]))
-            #affordance_map.append(torch.ones_like(affordance_map[0]) * -100)
-            bbox.append([0, 0, 0, 0])
-            if self._bbox_to_mask:
-                bbox_to_mask.append(torch.ones(tuple(image_size)).long() *-100)
-            axis.append([-1, -1, -1, -1])
-            masks.append(torch.zeros(tuple(image_size), dtype=bool))
-
-        valid = torch.BoolTensor(valid)
-        keypoint = torch.stack(keypoint)
-        movable = torch.stack(movable).squeeze()
-        rigid = torch.stack(rigid).squeeze()
-        kinematic = torch.stack(kinematic).squeeze()
-        action = torch.stack(action).squeeze()
-        
-        affordance = torch.stack(affordance)
-        #affordance_map = torch.stack(affordance_map)
-        affordance_size = (image_size[0] // 4, image_size[1] // 4)
-        affordance_map = torch.zeros((self._num_queries, *affordance_size))
-
-        #pdb.set_trace()
-        bbox = torch.FloatTensor(bbox)
-        if self._bbox_to_mask:
-            bbox_to_mask = torch.stack(bbox_to_mask)
-
-        axis = torch.FloatTensor(axis)
-        masks = torch.stack(masks)
-
-        # EDINA should have real fov, but we don't really use it
-        # so I put a random one
-        fov = 1.0 
-
-        # resize images to image_size
-        scale_factors = [s_new / s for s, s_new in zip(image.shape[0:2], image_size)]
-        scale_factor = sum(scale_factors) * 0.5
-        if scale_factor != 1.0:
-            image = torch.nn.functional.interpolate(
-                image.unsqueeze(0),
-                size=tuple(image_size),
-                mode="bilinear",
-            )[0]
-            depth = torch.nn.functional.interpolate(
-                depth.unsqueeze(0).unsqueeze(0),
-                size=tuple(image_size),
-                mode="nearest",
-            )[0, 0]
-
-
-        ret_entry = {
-            'img_name': img_name,
-            'image': image,
-            'valid': valid,
-            'keypoints': keypoint,
-            'bbox': bbox,
-            'masks': masks,
-            'movable': movable,
-            'rigid': rigid,
-            'kinematic': kinematic,
-            'action': action,
-            'affordance': affordance,
-            'affordance_map': affordance_map,
-            'depth': depth,
-            'axis': axis,
-            'fov': fov,
-        }
-
-        return ret_entry
-
-
-class MonoartiDataset(Dataset):
-    """
-    A simple dataset made of a list of entries.
+    3D Object Interaction Dataset
     """
 
     def __init__(
@@ -422,20 +247,14 @@ class MonoartiDataset(Dataset):
         img_name = entry['img_name']
 
         # read image
-        dataset_path = 'datatang_all'
-        if self._dataset_name.endswith('supp') or self._dataset_name.endswith('supp_nobox'):
+        if self._dataset_name.startswith('3doi'):
             dataset_path = 'images'
-            img_path = os.path.join(DEFAULT_DATA_ROOT, dataset_path, img_name)
         elif self._dataset_name.startswith('whirl'):
             dataset_path = 'whirl_images'
-            img_path = os.path.join(DEFAULT_DATA_ROOT, dataset_path, img_name)
-        elif self._dataset_name.startswith('omnidata_supp'):
-            img_path = entry['img_path']
-        elif self._dataset_name.startswith('monoarti'):
-            img_path = os.path.join(DEFAULT_DATA_ROOT, dataset_path, img_name)
         else:
             raise NotImplementedError("unknown dataset!")
-        
+        img_path = os.path.join(DEFAULT_DATA_ROOT, dataset_path, img_name)
+
         try:
             image = np.array(Image.open(img_path))
         except:
@@ -644,201 +463,6 @@ class MonoartiDataset(Dataset):
         return ret_entry
 
 
-
-class HiveMonoartiDataset(Dataset):
-    """
-    A simple dataset made of a list of entries.
-    """
-
-    def __init__(
-        self,
-        dataset_name,
-        entries: List, 
-        image_size,
-        num_views: int = 1,
-        load_depth: bool = False,
-    ):
-        """
-        Args:
-            entries: The list of dataset entries.
-        """
-        self._dataset_name = dataset_name
-        self._entries = entries
-        self._image_size = image_size
-        self._num_views = num_views
-        self._load_depth = load_depth
-
-        self.transforms = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
-
-        self.category_map = {
-            'one_hand': 0,
-            'two_hands': 1,
-            'fixture': 2,
-        }
-
-    def __len__(self):
-        return len(self._entries)
-
-    def __getitem__(self, index):
-        entry = self._entries[index]
-
-        # read image
-        image_size = self._image_size
-        img_path = entry['img_path']
-        img_path = img_path.replace(INITIAL_DATA_ROOT, DEFAULT_DATA_ROOT)
-        image = np.array(Image.open(img_path))
-        image = self.transforms(image)
-
-        # anchor point
-        query_pt = entry['query_pt']
-        anchors = torch.LongTensor([
-            int(query_pt[0] * image_size[0]),
-            int(query_pt[1] * image_size[1]),
-        ])
-
-        # category
-        category_str = entry['category']
-        category = torch.LongTensor([self.category_map[category_str]])
-        
-        # bbox
-        bbox = entry['bbox']
-        if bbox is None:
-            mask = torch.ones(tuple(image_size)).long() * -100
-            bbox = torch.FloatTensor([0, 0, 0, 0])
-        else:
-            if bbox[0] > 1.0:
-                raise ValueError(str(bbox))
-            bbox = [
-                int(entry['bbox'][1] * image_size[0]),
-                int(entry['bbox'][0] * image_size[1]),
-                int(entry['bbox'][3] * image_size[0]),
-                int(entry['bbox'][2] * image_size[1]),
-            ]
-            mask = torch.zeros(tuple(image_size)).long()
-            mask[bbox[0]:bbox[2], bbox[1]:bbox[3]] = 1
-            bbox = torch.FloatTensor(bbox)
-
-        # resize images to image_size
-        scale_factors = [s_new / s for s, s_new in zip(image.shape[0:2], image_size)]
-        #if abs(scale_factors[0] - scale_factors[1]) > 1e-3:
-        #    raise ValueError(
-        #        "Non-isotropic scaling is not allowed. Consider changing the 'image_size' argument."
-        #    )
-        scale_factor = sum(scale_factors) * 0.5
-        if scale_factor != 1.0:
-            image = torch.nn.functional.interpolate(
-                #image.permute(2, 0, 1).unsqueeze(0),
-                image.unsqueeze(0),
-                size=tuple(image_size),
-                mode="bilinear",
-            )[0]#.permute(1, 2, 0)
-
-        ret_entry = {
-            'image': image,
-            'anchors': anchors,
-            'category': category,
-            'bbox': bbox,
-            'masks': mask,
-        }
-        return ret_entry
-
-class ScanNetDataset(Dataset):
-    """
-    ScanNet planes
-    """
-
-    def __init__(
-        self,
-        dataset_name,
-        entries: List, 
-        image_size, 
-        num_views: int = 1,
-        load_depth: bool = False,
-    ):
-        """
-        Args:
-            entries: The list of dataset entries.
-        """
-        self._dataset_name = dataset_name
-        self._entries = entries
-        self._image_size = image_size
-        self._num_views = num_views
-        self._load_depth = load_depth
-
-        self.transforms = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
-
-    def __len__(self):
-        return len(self._entries)
-
-    def __getitem__(self, index):
-        entry = self._entries[index]
-
-        image_size = self._image_size
-        img_path = entry['img_path']
-
-        anchors = []
-        masks = []
-        instances = entry['instances']
-
-        # too many instances
-        max_instances = 10
-        if len(instances) > max_instances:
-            instances = random.sample(instances, max_instances)
-
-        # collect masks and sample anchors for each instance
-        for inst in instances:
-            mask = polygons_to_bitmask(inst['polygon'], 480, 640) # scannet size
-            mask = torch.FloatTensor(mask)
-            mask = torch.nn.functional.interpolate(
-                mask.unsqueeze(0).unsqueeze(0),
-                size=tuple(image_size),
-                mode="nearest",
-            )[0][0]
-            if mask.sum() < 5:
-                continue
-            pos_list = torch.nonzero(mask).cpu().numpy().tolist()
-            anchor = random.choice(pos_list)
-            anchors.append(anchor)
-            masks.append(mask[None, :])
-
-        # no instances
-        if len(masks) == 0:
-            idx = random.choice(range(self.__len__()))
-            return self.__getitem__(idx)
-        
-        anchors = torch.LongTensor(anchors)
-        masks = torch.cat(masks)
-
-        # read image
-        image = np.array(Image.open(img_path))
-        image = self.transforms(image)
-        
-        # resize images to image_size
-        scale_factors = [s_new / s for s, s_new in zip(image.shape[0:2], image_size)]
-        scale_factor = sum(scale_factors) * 0.5
-        if scale_factor != 1.0:
-            image = torch.nn.functional.interpolate(
-                #image.permute(2, 0, 1).unsqueeze(0),
-                image.unsqueeze(0),
-                size=tuple(image_size),
-                mode="bilinear",
-            )[0]#.permute(1, 2, 0)
-
-
-        ret_entry = {
-            'image': image,
-            'anchors': anchors,
-            'masks': masks,
-        }
-        return ret_entry
-    
-
 def prepare_datasets(
     dataset_name: str,
     image_size: Tuple[int, int],
@@ -869,20 +493,8 @@ def prepare_datasets(
         train_data = torch.load(cameras_path)
         entries = train_data
 
-    if dataset_name.startswith('monoarti') or dataset_name.startswith('whirl') or dataset_name.startswith('omnidata_supp'):
-        dataset = MonoartiDataset(
-            dataset_name,
-            entries, 
-            image_size,
-            output_size,
-            num_views=num_views, 
-            load_depth=load_depth,
-            affordance_radius=affordance_radius,
-            num_queries=num_queries,
-            bbox_to_mask=bbox_to_mask,
-        )
-    elif dataset_name.startswith('edina'):
-        dataset = EDINADataset(
+    if dataset_name.startswith('3doi') or dataset_name.startswith('whirl') or dataset_name.startswith('omnidata_supp'):
+        dataset = InteractionDataset(
             dataset_name,
             entries, 
             image_size,
@@ -922,7 +534,7 @@ def merge_datasets(datasets: List[Dataset]) -> Dataset:
     return dataset
 
 
-def get_monoarti_datasets(
+def get_interaction_datasets(
     train_dataset_names: List[str],
     val_dataset_names: List[str],
     test_dataset_names: List[str],

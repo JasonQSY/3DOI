@@ -26,7 +26,7 @@ If you are interested in the inference-only code, you can also try our demo code
 
 ## Setup
 
-We are using anaconda to set up the python environment. It is tested on pytorch 2.0.1,
+We are using anaconda to set up the python environment. It is tested on python 3.9 and pytorch 2.0.1. pytorch3d is only required for 3D visualization.
 
 ```bash
 # python
@@ -41,18 +41,21 @@ pip install accelerate
 pip install submitit
 pip install hydra-core --upgrade --pre
 pip install hydra-submitit-launcher --upgrade
-pip install visdom
-pip install packaging plotly imageio imageio-ffmpeg matplotlib h5py opencv-contrib-python
-pip install tqdm wandb pycocotools
+pip install pycocotools
+pip install packaging plotly imageio imageio-ffmpeg matplotlib h5py opencv-python
+pip install tqdm wandb visdom
+
+# (optional, for 3D visualization) pytorch3d
+pip install "git+https://github.com/facebookresearch/pytorch3d.git"
 ```
 
-Create `checkpoints` for all experiments.
+Create `checkpoints` to store pretrained checkpoints.
 
 ```bash
-mkdir exps
+mkdir checkpoints
 ```
 
-If necessary, download our [pretrained model](https://drive.google.com/file/d/1ZBhUqoflC57JLd0DjOZAzErhN4fDV3c6/view?usp=sharing) and put it at `exps/model_final.pth`
+If necessary, download our [pretrained SAM model](https://fouheylab.eecs.umich.edu/~syqian/3DOI/checkpoint_20230515.pth) and put it at `checkpoints/checkpoint_20230515.pth`.
 
 
 ## Dataset
@@ -64,7 +67,13 @@ I haven't had enough time to release the 3D Object Interaction dataset officiall
 To test the model on any 3DOI or other dataset, run
 
 ```bash
-python test.py --config-name sam checkpoint_path=multirun/sam/2023-04-29-23-35-06/0/checkpoints/checkpoint_195.pth output_dir=vis train.batch_size=1 test.mode='export_wall' test.split='test'
+python test.py --config-name sam_inference checkpoint_path=checkpoints/checkpoint_20230515.pth output_dir=vis
+```
+
+To create video animation, run
+
+```bash
+python test.py --config-name sam_inference checkpoint_path=checkpoints/checkpoint_20230515.pth output_dir=vis test.mode='export_video'
 ```
 
 ## Training 

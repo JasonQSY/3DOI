@@ -15,7 +15,7 @@ import pdb
 import random
 import torch.nn.functional as F
 
-from monoarti.dataset import get_monoarti_datasets
+from monoarti.dataset import get_interaction_datasets
 from monoarti.stats import Stats
 from monoarti.detr.misc import nested_tensor_from_tensor_list
 from monoarti.detr import box_ops
@@ -27,14 +27,6 @@ from monoarti.utils import compute_kl_divergence, compute_sim
 
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "configs")
 logger = logging.getLogger(__name__)
-
-def single_gpu_prepare(state_dict):
-    new_state_dict = collections.OrderedDict()
-    for k, v in state_dict.items():
-        name = k.replace("module.", "")
-        new_state_dict[name] = v
-    del state_dict
-    return new_state_dict
 
 
 def evaluate(cfg, model, val_dataloader, accelerator, stats):
@@ -338,16 +330,7 @@ def main(cfg: DictConfig):
         
         loaded_data = torch.load(checkpoint_path, map_location=map_location)
         state_dict = loaded_data["model"]
-        #state_dict = single_gpu_prepare(state_dict)
 
-        # do not load xxx
-        #model_dict = model.state_dict()
-        # state_dict = {k: v for k, v in state_dict.items() if not k.startswith('depth_attention')}
-        # state_dict = {k: v for k, v in state_dict.items() if not k.startswith('depth_head')}
-        #pdb.set_trace()
-        #model_dict.update(state_dict) 
-        
-        #model.load_state_dict(state_dict, strict=True)
         model.load_state_dict(state_dict, strict=False)
 
         # continue training: load optimizer and stats
@@ -461,7 +444,7 @@ def main(cfg: DictConfig):
     #     viz = None
     viz = None
 
-    train_dataset, val_dataset, test_dataset = get_monoarti_datasets(
+    train_dataset, val_dataset, test_dataset = get_interaction_datasets(
         train_dataset_names=cfg.data.train_dataset_names,
         val_dataset_names=cfg.data.val_dataset_names,
         test_dataset_names=cfg.data.test_dataset_names,

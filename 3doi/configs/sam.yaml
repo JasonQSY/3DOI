@@ -43,6 +43,7 @@ optimizer:
 model:
   name: "sam"
   backbone_name: "vit_b"
+  sam_pretrained: True
 hydra:
   launcher:
     name: 'SAM'

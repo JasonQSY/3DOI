@@ -39,6 +39,10 @@ class SamTransformer(nn.Module):
         backbone_name: str,
         pixel_mean: List[float] = [123.675, 116.28, 103.53],
         pixel_std: List[float] = [58.395, 57.12, 57.375],
+        sam_pretrained: bool = False,
+        image_size: List[int] = [768, 1024],
+        num_queries: int = 15,
+        affordance_focal_alpha: float = 0.95,
     ) -> None:
         """
         SAM predicts object masks from an image and input prompts.
@@ -79,15 +83,13 @@ class SamTransformer(nn.Module):
         else:
             raise ValueError
 
-        with open(checkpoint_path, "rb") as f:
-            state_dict = torch.load(f)
-        self.load_state_dict(state_dict, strict=False)
+        if sam_pretrained:
+            with open(checkpoint_path, "rb") as f:
+                state_dict = torch.load(f)
+            self.load_state_dict(state_dict, strict=False)
 
-        # self.affordance_decoder.load_state_dict(self.mask_decoder.state_dict(), strict=False)
-        # self.depth_decoder.load_state_dict(self.mask_decoder.state_dict(), strict=False)
-
-        self.num_queries = 15
-        self._affordance_focal_alpha = 0.95
+        self.num_queries = num_queries
+        self._affordance_focal_alpha = affordance_focal_alpha
         self._ignore_index = -100
 
     @property
@@ -362,86 +364,6 @@ class SamTransformer(nn.Module):
             out['loss_dice'] = dice_loss(src_masks, tgt_masks, num_masks)
 
         return out
-
-    @torch.no_grad()
-    def forward_default(
-        self,
-        batched_input: List[Dict[str, Any]],
-        multimask_output: bool,
-    ) -> List[Dict[str, torch.Tensor]]:
-        """
-        Predicts masks end-to-end from provided images and prompts.
-        If prompts are not known in advance, using SamPredictor is
-        recommended over calling the model directly.
-
-        Arguments:
-          batched_input (list(dict)): A list over input images, each a
-            dictionary with the following keys. A prompt key can be
-            excluded if it is not present.
-              'image': The image as a torch tensor in 3xHxW format,
-                already transformed for input to the model.
-              'original_size': (tuple(int, int)) The original size of
-                the image before transformation, as (H, W).
-              'point_coords': (torch.Tensor) Batched point prompts for
-                this image, with shape BxNx2. Already transformed to the
-                input frame of the model.
-              'point_labels': (torch.Tensor) Batched labels for point prompts,
-                with shape BxN.
-              'boxes': (torch.Tensor) Batched box inputs, with shape Bx4.
-                Already transformed to the input frame of the model.
-              'mask_inputs': (torch.Tensor) Batched mask inputs to the model,
-                in the form Bx1xHxW.
-          multimask_output (bool): Whether the model should predict multiple
-            disambiguating masks, or return a single mask.
-
-        Returns:
-          (list(dict)): A list over input images, where each element is
-            as dictionary with the following keys.
-              'masks': (torch.Tensor) Batched binary mask predictions,
-                with shape BxCxHxW, where B is the number of input prompts,
-                C is determined by multimask_output, and (H, W) is the
-                original size of the image.
-              'iou_predictions': (torch.Tensor) The model's predictions
-                of mask quality, in shape BxC.
-              'low_res_logits': (torch.Tensor) Low resolution logits with
-                shape BxCxHxW, where H=W=256. Can be passed as mask input
-                to subsequent iterations of prediction.
-        """
-        input_images = torch.stack([self.preprocess(x["image"]) for x in batched_input], dim=0)
-        image_embeddings = self.image_encoder(input_images)
-
-        outputs = []
-        for image_record, curr_embedding in zip(batched_input, image_embeddings):
-            if "point_coords" in image_record:
-                points = (image_record["point_coords"], image_record["point_labels"])
-            else:
-                points = None
-            sparse_embeddings, dense_embeddings = self.prompt_encoder(
-                points=points,
-                boxes=image_record.get("boxes", None),
-                masks=image_record.get("mask_inputs", None),
-            )
-            low_res_masks, iou_predictions = self.mask_decoder(
-                image_embeddings=curr_embedding.unsqueeze(0),
-                image_pe=self.prompt_encoder.get_dense_pe(),
-                sparse_prompt_embeddings=sparse_embeddings,
-                dense_prompt_embeddings=dense_embeddings,
-                multimask_output=multimask_output,
-            )
-            masks = self.postprocess_masks(
-                low_res_masks,
-                input_size=image_record["image"].shape[-2:],
-                original_size=image_record["original_size"],
-            )
-            masks = masks > self.mask_threshold
-            outputs.append(
-                {
-                    "masks": masks,
-                    "iou_predictions": iou_predictions,
-                    "low_res_logits": low_res_masks,
-                }
-            )
-        return outputs
 
     def postprocess_masks(
         self,

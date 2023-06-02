@@ -18,7 +18,8 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import matplotlib.patches as mpatches
 
-from monoarti.dataset import get_monoarti_datasets
+# get_monoarti_datasets
+from monoarti.dataset import get_interaction_datasets
 from monoarti.stats import Stats
 from monoarti.visualizer import Visualizer
 from monoarti.detr import box_ops
@@ -28,6 +29,7 @@ from monoarti.detr.misc import interpolate
 from monoarti.vis_utils import draw_properties, draw_affordance, draw_localization
 
 # 3d modules
+# comment them if you do not need export_video
 import pytorch3d
 from pytorch3d.io import save_obj
 from pytorch3d.renderer import FoVPerspectiveCameras
@@ -42,13 +44,7 @@ plt.rcParams['font.serif'] = ['Times New Roman'] + plt.rcParams['font.serif']
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "configs")
 logger = logging.getLogger(__name__)
 
-def single_gpu_prepare(state_dict):
-    new_state_dict = collections.OrderedDict()
-    for k, v in state_dict.items():
-        name = k.replace("module.", "")
-        new_state_dict[name] = v
-    del state_dict
-    return new_state_dict
+
 
 def uint82bin(n, count=8):
     """returns the binary of integer n, count refers to amount of bits"""
@@ -146,251 +142,16 @@ action_imap = {
 
 
 def export_imgs(cfg, val_dataloader, model, stats, export_dir, device):
-    batch_size = cfg.train.batch_size
-
-    for iteration, batch in tqdm(enumerate(val_dataloader)):
-        img_names = batch['img_name']
-        image = batch['image']
-        bbox = batch['bbox']
-        valid = batch['valid']
-        keypoints = batch['keypoints']
-        movable_gts = batch['movable']
-        rigid_gts = batch['rigid']
-        kinematic_gts = batch['kinematic']
-        action_gts = batch['action']
-        axis_gts = batch['axis']
-        depth_gts = batch['depth']
-        affordance_gts = batch['affordance']
-        mask_gts = batch['masks']
-
-        bbox_gt_scaled = box_ops.rescale_bboxes(bbox.cpu(), cfg.data.image_size).long()
-
-        image_size = (image.shape[2], image.shape[3])
-
-        # inference
-        with torch.no_grad():
-           out = model(**batch)
-
-        bbox_preds = out['pred_boxes']
-        bbox_scaled = box_ops.rescale_bboxes(out['pred_boxes'].cpu(), cfg.data.image_size).long()
-        mask_preds = out['pred_masks']
-        mask_preds = interpolate(mask_preds, size=image_size, mode='bilinear', align_corners=False)
-        mask_preds = mask_preds.sigmoid() > 0.5
-        movable_preds = out['pred_movable'].argmax(dim=-1)
-        rigid_preds = out['pred_rigid'].argmax(dim=-1)
-        kinematic_preds = out['pred_kinematic'].argmax(dim=-1)
-        action_preds = out['pred_action'].argmax(dim=-1)
-        axis_preds = out['pred_axis']
-        depth_preds = out['pred_depth']
-        affordance_preds = out['pred_affordance']
-        if depth_preds is not None:
-            depth_preds = interpolate(depth_preds, size=depth_gts.shape[-2:], mode='bilinear', align_corners=False)
-
-        # classification
-        # axis_bins = cfg.model.axis_bins
-        # src_axis_theta = axis_preds[:, :, :axis_bins]
-        # src_axis_offset = axis_preds[:, :, axis_bins:]
-        # src_axis_theta = src_axis_theta.argmax(dim=-1) / axis_bins * (torch.pi)
-        # src_axis_sin = torch.sin(src_axis_theta)
-        # src_axis_cos = torch.cos(src_axis_theta)
-        # src_axis_offset = src_axis_offset.argmax(dim=-1) / axis_bins * np.sqrt(2) - (np.sqrt(2) / 2)
-        # src_axis_angle = torch.stack((src_axis_sin, src_axis_cos, src_axis_offset), dim=-1)
-
-
-        for i in range(image.shape[0]):
-            img_name = img_names[i]
-            # if img_name != 'taskonomy_ooltewah_point_309_view_0_domain_rgb.png':
-            #if (iteration * batch_size + i) != 2:
-            #    continue
-            # else:
-            #     pdb.set_trace()
-
-            rgb = tensor_to_image(image.cpu()[i])
-            rgb = rgb[:, :, ::-1]
-
-            # regression
-            #axis_center = box_ops.box_xyxy_to_cxcywh(bbox_preds[i]).clone()
-            axis_center = box_ops.box_xyxy_to_cxcywh(bbox[i]).clone()
-            axis_center[:, 2:] = axis_center[:, :2]
-            axis_pred = axis_preds[i]
-            axis_pred_norm = F.normalize(axis_pred[:, :2])
-            axis_pred = torch.cat((axis_pred_norm, axis_pred[:, 2:]), dim=-1)
-            src_axis_xyxys = axis_ops.line_angle_to_xyxy(axis_pred, center=axis_center)
-
-            # classification
-            # src_axis_xyxys = axis_ops.line_angle_to_xyxy(src_axis_angle[i])
-
-            #if (iteration * batch_size + i) == 1:
-            #    pdb.set_trace()
-
-            instances = []
-            for j in range(15):
-                if not valid[i, j]:
-                    break
-
-                movable_pred = movable_preds[i, j].item()
-                rigid_pred = rigid_preds[i, j].item()
-                kinematic_pred = kinematic_preds[i, j].item()
-                action_pred = action_preds[i, j].item()
-
-                axis_pred = src_axis_xyxys[j]
-                #axis_pred = axis_preds[i, j].numpy().tolist()
-                if kinematic_imap[kinematic_pred] != 'rotation':
-                    axis_pred = [-1, -1, -1, -1]
-                aff_pred = affordance_preds[i, j].cpu().numpy().tolist()
-                aff_pred[0] = int(aff_pred[0] * cfg.data.image_size[1])
-                aff_pred[1] = int(aff_pred[1] * cfg.data.image_size[0])
-
-                # if rigid_pred == 2:
-                #     pdb.set_trace()
-                #     pass
-
-                pred_entry = {
-                    'keypoint': keypoints[i, j].cpu().numpy().tolist(),
-                    'bbox': bbox_scaled[i, j].numpy().tolist(),
-                    'mask': mask_preds[i, j].cpu().numpy(),
-                    #'mask': None,
-                    'affordance': aff_pred,
-                    'move': movable_imap[movable_pred],
-                    'rigid': rigid_imap[rigid_pred],
-                    'kinematic': kinematic_imap[kinematic_pred],
-                    'pull_or_push': action_imap[action_pred],
-                    'axis': axis_pred,
-                }
-
-                instances.append(pred_entry)
-
-            vis = Visualizer(rgb)
-            vis.overlay_instances(instances)
-            img_path = os.path.join(export_dir, '{:0>6}_pred.png'.format(iteration * batch_size + i))
-            vis.output.save(img_path)
-
-            # depth
-            if depth_preds is not None:
-                depth_pred = depth_preds[i]
-                gt_depth = depth_gts[i]
-                if (gt_depth > -0.5).any():
-                    depth_pred_metric = depth_ops.recover_metric_depth(depth_pred[0], gt_depth)
-                    fig = plt.figure()
-                    plt.imshow(depth_pred_metric, cmap=mpl.colormaps['plasma'])
-                    depth_path = os.path.join(export_dir, '{:0>6}_depth.png'.format(iteration * batch_size + i))
-                    #logger.info(depth_path)
-                    plt.savefig(depth_path)
-                    plt.close(fig)
-                    fig = plt.figure()
-                    plt.imshow(gt_depth.cpu().numpy(), cmap=mpl.colormaps['plasma'])
-                    depth_path = os.path.join(export_dir, '{:0>6}_depth_gt.png'.format(iteration * batch_size + i))
-                    plt.savefig(depth_path)
-                    plt.close(fig)
-                else:
-                    depth_pred_metric = depth_pred[0] * 1.0 + 4.0
-                    depth_pred_metric = depth_pred_metric.cpu().numpy()
-                    fig = plt.figure()
-                    plt.imshow(depth_pred_metric, cmap=mpl.colormaps['plasma'])
-                    depth_path = os.path.join(export_dir, '{:0>6}_depth.png'.format(iteration * batch_size + i))
-                    #logger.info(depth_path)
-                    plt.savefig(depth_path)
-                    plt.close(fig)
-
-                    fig = plt.figure()
-                    gt_depth = np.zeros_like(depth_pred_metric)
-                    plt.imshow(gt_depth, cmap=mpl.colormaps['plasma'])
-                    depth_path = os.path.join(export_dir, '{:0>6}_depth_gt.png'.format(iteration * batch_size + i))
-                    plt.savefig(depth_path)
-                    plt.close(fig)
-
-
-            # ground truth            
-            axis_gt = axis_gts[i]
-            valid_axis = axis_gt[:, 0] > 0
-            # if (iteration * batch_size + i) == 3:
-            #     axis_pre = axis_gt[valid_axis]
-            #     axis_angle = axis_ops.line_xyxy_to_angle(axis_pre, debug=False)
-            #     axis_after = axis_ops.line_angle_to_xyxy(axis_angle, debug=False)
-                
-            #     for j in range(valid_axis.sum()):
-            #         fig = plt.figure()
-            #         plt.plot(
-            #             axis_pre[j, 0:4:2].cpu(), 
-            #             axis_pre[j, 1:4:2].cpu(), 
-            #             axis_after[j, 0:4:2].cpu(), 
-            #             axis_after[j, 1:4:2].cpu(), 
-            #             marker='o'
-            #         )
-            #         plt.xlim(0.0, 1.0)
-            #         plt.ylim(0.0, 1.0)
-            #         plt.savefig('vis_{}.png'.format(j))
-            #         plt.close(fig)
-                
-            #     pdb.set_trace()
-            #     pass
-            if valid_axis.sum() > 0:
-                axis_angle = axis_ops.line_xyxy_to_angle(axis_gt[valid_axis])
-                axis_xyxy = axis_ops.line_angle_to_xyxy(axis_angle)
-                axis_gt[valid_axis] = axis_xyxy
-
-            
-
-            gt_instances = []
-            for j in range(10):
-                if not valid[i, j]:
-                    break
-
-                aff_gt = affordance_gts[i, j]
-                aff_gt[0] = int(aff_gt[0] * cfg.data.image_size[1])
-                aff_gt[1] = int(aff_gt[1] * cfg.data.image_size[0])
-
-                gt_entry = {
-                    'keypoint': keypoints[i, j].cpu().numpy().tolist(),
-                    'bbox': bbox_gt_scaled[i, j].numpy().tolist(),
-                    'mask': mask_gts[i, j].cpu().numpy(),
-                    'affordance': aff_gt,
-                    'move': movable_imap[movable_gts[i, j].item()],
-                    'rigid': rigid_imap[rigid_gts[i, j].item()],
-                    'kinematic': kinematic_imap[kinematic_gts[i, j].item()],
-                    'pull_or_push': action_imap[action_gts[i, j].item()],
-                    'axis': axis_gts[i, j],
-                    #'axis': axis_gt[j],
-                }
-                gt_instances.append(gt_entry)
-            #instances = [gt_entry]
-            vis = Visualizer(rgb)
-            vis.overlay_instances(gt_instances)
-            img_path = os.path.join(export_dir, '{:0>6}_gt.png'.format(iteration * batch_size + i))
-            vis.output.save(img_path)
-
-
-def export_wall(cfg, val_dataloader, model, stats, export_dir, device):
     """
     Draw qualitative results in the paper.
     """
     batch_size = cfg.train.batch_size
-    shortlist = [
-        # example wall
-        # 'AR_JicDZL73B2c_5_2430_5.jpg',
-        # 'EK_0037_P28_101_frame_0000031096.jpg',
-        # 'taskonomy_wando_point_156_view_3_domain_rgb.png',
-        # 'EK_0056_P04_121_frame_0000058376.jpg',
-        # 'AR_Q7lby63TWgY_107_180_85.jpg',
-        # teaser
-        # 'taskonomy_springerville_point_774_view_4_domain_rgb.png',
-        # approach
-        # 'taskonomy_keiser_point_83_view_4_domain_rgb.png', 
-        # 3dadn
-        # 'AR_IoYo9NRjACQ_8_990_5.jpg',
-        # 'taskonomy_anthoston_point_309_view_1_domain_rgb.png',
-        # failure
-        # 'taskonomy_applewold_point_44_view_9_domain_rgb.png',
-        # 'EK_0012_P02_122_frame_0000024176.jpg',
-        # 'EK_0013_P02_135_frame_0000001626.jpg',
-
-    ]
+    shortlist = []
 
     for iteration, batch in tqdm(enumerate(val_dataloader)):
         img_names = batch['img_name']
         image = batch['image']
         image_size = (image.shape[2], image.shape[3])
-        #image = interpolate(image, tuple(cfg.data.output_size), mode='bilinear', align_corners=False)
         bbox = batch['bbox']
         valid = batch['valid']
         keypoints = batch['keypoints']
@@ -400,7 +161,6 @@ def export_wall(cfg, val_dataloader, model, stats, export_dir, device):
         action_gts = batch['action']
         axis_gts = batch['axis']
         depth_gts = batch['depth']
-        #affordance_gts = batch['affordance']
         affordance_gts = batch['affordance_map']
         affordance_gts = interpolate(affordance_gts, size=image_size, mode='bilinear', align_corners=False)
         mask_gts = batch['masks']
@@ -411,8 +171,6 @@ def export_wall(cfg, val_dataloader, model, stats, export_dir, device):
         with torch.no_grad():
            out = model(**batch)
 
-        # bbox_preds = out['pred_boxes']
-        # bbox_scaled = box_ops.rescale_bboxes(out['pred_boxes'].cpu(), cfg.data.image_size).long()
         mask_preds = out['pred_masks']
         mask_preds = interpolate(mask_preds, size=image_size, mode='bilinear', align_corners=False)
         mask_preds = mask_preds.sigmoid() > 0.5
@@ -429,7 +187,6 @@ def export_wall(cfg, val_dataloader, model, stats, export_dir, device):
 
         for i in range(image.shape[0]):
             img_name = img_names[i]
-            #img_name = img_name.split('.')[0]
             img_idx = iteration * batch_size + i
 
             if len(shortlist) > 0 and img_name not in shortlist:
@@ -439,18 +196,12 @@ def export_wall(cfg, val_dataloader, model, stats, export_dir, device):
             rgb = rgb[:, :, ::-1]
 
             # regression
-            #axis_center = box_ops.box_xyxy_to_cxcywh(bbox_preds[i]).clone()
             axis_center = box_ops.box_xyxy_to_cxcywh(bbox[i]).clone()
             axis_center[:, 2:] = axis_center[:, :2]
             axis_pred = axis_preds[i]
-            #pdb.set_trace()
             axis_pred_norm = F.normalize(axis_pred[:, :2])
             axis_pred = torch.cat((axis_pred_norm, axis_pred[:, 2:]), dim=-1)
             src_axis_xyxys = axis_ops.line_angle_to_xyxy(axis_pred, center=axis_center)
-
-            # classification
-            # src_axis_xyxys = axis_ops.line_angle_to_xyxy(src_axis_angle[i])
-
             
             pred_entry1 = {
                 'keypoint': None,
@@ -482,8 +233,6 @@ def export_wall(cfg, val_dataloader, model, stats, export_dir, device):
                 [192, 80, 77], # red
             ]) / 255.0
             vis.overlay_instances(instances, assigned_colors=colors_teaser, alpha=0.6)
-            #vis.output.save(output_path)
-            #pdb.set_trace()
 
             instances = []
             for j in range(15):
@@ -514,7 +263,6 @@ def export_wall(cfg, val_dataloader, model, stats, export_dir, device):
                 draw_localization(
                     rgb, 
                     img_path, 
-                    #bbox_scaled[i, j].numpy().tolist(),
                     None,
                     mask_preds[i, j].cpu().numpy(),
                     axis_pred,
@@ -533,8 +281,6 @@ def export_wall(cfg, val_dataloader, model, stats, export_dir, device):
             if valid_axis.sum() > 0:
                 axis_angle = axis_ops.line_xyxy_to_angle(axis_gt[valid_axis])
                 axis_xyxy = axis_ops.line_angle_to_xyxy(axis_angle)
-                # if img_name == 'can_000000.png':
-                #     pdb.set_trace()
                 axis_gt[valid_axis] = axis_xyxy
 
             gt_instances = []
@@ -555,7 +301,6 @@ def export_wall(cfg, val_dataloader, model, stats, export_dir, device):
                 draw_localization(
                     rgb, 
                     img_path, 
-                    #bbox_gt_scaled[i, j].numpy().tolist(), 
                     None,
                     mask_gts[i, j].cpu().numpy(),
                     axis_gt[j],
@@ -596,35 +341,8 @@ def export_wall(cfg, val_dataloader, model, stats, export_dir, device):
                     plt.savefig(depth_path, bbox_inches='tight', pad_inches=0)
                     plt.close(fig)
 
-            #pdb.set_trace()
 
-# model_type = "DPT_Large"
-# midas = torch.hub.load("intel-isl/MiDaS", model_type)
-# device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-# midas.to(device)
-# midas.eval()
-# midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
-# if model_type == "DPT_Large" or model_type == "DPT_Hybrid":
-#     transform = midas_transforms.dpt_transform
-# else:
-#     transform = midas_transforms.small_transform
-
-# def get_midas_depth(model, img):
-#     input_batch = transform(img).to(device)
-#     with torch.no_grad():
-#         prediction = model(input_batch)
-#     prediction = torch.nn.functional.interpolate(
-#         prediction.unsqueeze(1),
-#         size=img.shape[:2],
-#         mode="bicubic",
-#         align_corners=False,
-#     ).squeeze()
-
-#     output = prediction.cpu().numpy()
-#     return output
-
-
-def export_teaser(cfg, val_dataloader, model, stats, export_dir, device):
+def export_video(cfg, val_dataloader, model, stats, export_dir, device):
     batch_size = cfg.train.batch_size
     assert batch_size == 1
 
@@ -648,14 +366,10 @@ def export_teaser(cfg, val_dataloader, model, stats, export_dir, device):
         if len(shortlist_ids) > 0 and img_name[0] not in shortlist_ids:
             continue
 
-        # if iteration != 15:
-        #     continue
-
         image = batch['image']
         image_size = (image.shape[2], image.shape[3])
         bbox = batch['bbox']
         valid = batch['valid']
-        #masks = batch['masks']
         keypoints = batch['keypoints']
         movable_gts = batch['movable']
         rigid_gts = batch['rigid']
@@ -730,27 +444,15 @@ def export_teaser(cfg, val_dataloader, model, stats, export_dir, device):
             vis.output.save(img_path)
 
             # depth
-            #depth_pred = interpolate(depth_pred, size=gt_depth.shape[-2:], mode='bilinear', align_corners=False)
             depth_pred = depth_preds[i]
             gt_depth = depth_gts[i]
-            #pdb.set_trace()
             if gt_depth[0, 0] <= -0.5:
-                #continue
-                #depth_pred_metric = depth_pred * 0.945 + 0.658 # edina average scale and shift
                 depth_pred_metric = depth_pred * 6.69 + 1.10 # omnidata average scale and shift
                 depth_pred_metric = depth_pred_metric.cpu()[0]
             else:
                 #depth_pred_metric = depth_pred * 6.69 + 1.10 # omnidata average scale and shift
                 depth_pred_metric = depth_ops.recover_metric_depth(depth_pred[0], gt_depth)
                 depth_pred_metric = torch.as_tensor(depth_pred_metric)
-
-            # use midas depth
-            # midas_depth_pred = get_midas_depth(midas, rgb)
-            # depth_pred_metric = depth_ops.recover_metric_depth(midas_depth_pred, gt_depth)
-            # depth_pred_metric = torch.as_tensor(depth_pred_metric)
-
-            # use gt depth
-            #depth_pred_metric = gt_depth.cpu()
 
             # focal length
             if fov[i] < 0: # no gt fov
@@ -764,12 +466,6 @@ def export_teaser(cfg, val_dataloader, model, stats, export_dir, device):
                 if inst['kinematic'] == 'freeform':
                     continue
 
-                # if inst['kinematic'] == 'translation':
-                #     continue
-                
-                # select object
-                # if obj_idx != 2:
-                #     continue
                 obj_mask = mask_preds[i, obj_idx]
                 if obj_mask.sum() < 20:
                     continue
@@ -844,13 +540,7 @@ def export_teaser(cfg, val_dataloader, model, stats, export_dir, device):
                     dir_vec = dir_vec / np.linalg.norm(dir_vec)
                     t1 = pytorch3d.transforms.Transform3d().translate(axis_points[0][0], axis_points[0][1], axis_points[0][2])
                     t1 = t1.cuda()
-                    if axis_dir == 'l':
-                        angles = torch.FloatTensor(np.arange(-1.8, 0.1, 1.8/4)[:, np.newaxis])
-                    elif axis_dir == 'r':
-                        #angles = torch.FloatTensor(np.arange(0.0, 1.9, 1.8/4)[:, np.newaxis])
-                        angles = torch.FloatTensor(np.linspace(0.0, 1.8, num_steps)[:, np.newaxis])
-                    else:
-                        raise NotImplementedError
+                    angles = torch.FloatTensor(np.linspace(0.0, 1.8, num_steps)[:, np.newaxis])
                     axis_angles = angles * dir_vec
                     rot_mats = pytorch3d.transforms.axis_angle_to_matrix(axis_angles)
                     t2 = pytorch3d.transforms.Rotate(rot_mats)
@@ -868,7 +558,6 @@ def export_teaser(cfg, val_dataloader, model, stats, export_dir, device):
 
                     
                 elif inst['kinematic'] == 'translation':
-                    #angles = torch.arange(0, 0.42, 0.08).unsqueeze(1)
                     angles = torch.linspace(0, 0.40, num_steps).unsqueeze(1)
                     dir_vec = plane_normal
                     trans_vectors = angles * dir_vec
@@ -912,152 +601,6 @@ def export_teaser(cfg, val_dataloader, model, stats, export_dir, device):
 
                 # obj_path = os.path.join(export_dir, '{:0>6}_pred_axis_1.obj'.format(iteration * batch_size + i))
                 # save_obj(obj_path, meshes.verts_list()[1], meshes.faces_list()[1], verts_uvs=verts_uvs, faces_uvs=faces, texture_map=rgb_tensor)
-
-
-
-
-def export_interactive(cfg, val_dataloader, model, export_dir, device):
-    batch_size = cfg.train.batch_size
-    assert batch_size == 1
-
-    # shortlist_ids = [
-    #     4, 8, 25, 40, 60, 62, 136
-    # ]
-    shortlist_ids = [
-        'taskonomy_elmira_point_161_view_3_domain_rgb.png',
-        'EK_0031_P22_107_frame_0000006883.jpg',
-        'taskonomy_hatfield_point_123_view_2_domain_rgb.png',
-        'AR_ti__rePA0JM_8_90_5.jpg',
-        'taskonomy_kerrtown_point_41_view_4_domain_rgb.png',
-        'EK_0056_P04_121_frame_0000023167.jpg',
-        'taskonomy_castroville_point_293_view_2_domain_rgb.png',
-    ]
-
-    for iteration, batch in tqdm(enumerate(val_dataloader)):
-        img_names = batch['img_name']
-        if img_names[0] not in shortlist_ids:
-            continue
-        image = batch['image']
-        bbox = batch['bbox']
-        valid = batch['valid']
-        keypoints = batch['keypoints']
-        movable_gts = batch['movable']
-        rigid_gts = batch['rigid']
-        kinematic_gts = batch['kinematic']
-        action_gts = batch['action']
-        axis_gts = batch['axis']
-        depth_gts = batch['depth']
-        affordance_gts = batch['affordance']
-        mask_gts = batch['masks']
-        rgb = tensor_to_image(image.cpu()[0])
-        rgb = rgb[:, :, ::-1]
-
-        # save original image
-        vis = rgb.copy()
-        img_path = os.path.join(export_dir, '{:0>6}_rgb.png'.format(iteration))
-        #Image.fromarray(vis.astype(np.uint8)).resize((256, 192)).save(img_path)
-        Image.fromarray(vis.astype(np.uint8)).resize((512, 384)).save(img_path)
-
-        # create a directory for results
-        result_dir = os.path.join(export_dir, '{:0>6}'.format(iteration))
-        os.makedirs(result_dir, exist_ok=True)
-
-        # prepare keypoints
-        image_size = (image.shape[2], image.shape[3])
-        height = image.shape[2]
-        width = image.shape[3]
-        step_size = 40
-        grid_x, grid_y = torch.meshgrid(
-            torch.range(0, width, step_size), 
-            torch.range(0, height, step_size)
-        )
-        keypoints_grid = torch.dstack([grid_x, grid_y]).reshape(-1, 2)
-        keypoints_grid = keypoints_grid.unsqueeze(0)
-        keypoints_grid = keypoints_grid.cuda()
-        
-        grid_size = keypoints_grid.shape[1]
-        grid_batch = 100
-        num_queries = cfg.data.num_queries
-        instances = []
-
-        for start_idx in range(0, grid_size, grid_batch):
-            keypoints_batch = keypoints_grid[:, start_idx:(start_idx + grid_batch)]
-            valid = torch.zeros(keypoints_batch.shape[1]).bool()
-            batch['valid'] = valid
-            batch['keypoints'] = keypoints_batch
-
-            with torch.no_grad():
-                out = model(**batch, backward=False)
-
-            bbox_scaled = box_ops.rescale_bboxes(out['pred_boxes'].cpu(), cfg.data.image_size).long()
-            mask_preds = out['pred_masks']
-            mask_preds = interpolate(mask_preds, size=image_size, mode='bilinear', align_corners=False)
-            mask_preds = mask_preds.sigmoid() > 0.5
-            movable_preds = out['pred_movable'].argmax(dim=-1)
-            rigid_preds = out['pred_rigid'].argmax(dim=-1)
-            kinematic_preds = out['pred_kinematic'].argmax(dim=-1)
-            action_preds = out['pred_action'].argmax(dim=-1)
-            axis_preds = out['pred_axis']
-            #depth_preds = out['pred_depth']
-            affordance_preds = out['pred_affordance']
-            #if depth_preds is not None:
-            #    depth_preds = interpolate(depth_preds, size=depth_gts.shape[-2:], mode='bilinear', align_corners=False)
-
-            i = 0
-            # src_axis_xyxys = axis_ops.line_angle_to_xyxy(axis_preds[i])
-
-            axis_center = box_ops.box_xyxy_to_cxcywh(out['pred_boxes'][i]).clone()
-            axis_center[:, 2:] = axis_center[:, :2]
-            axis_pred = axis_preds[i]
-            axis_pred_norm = F.normalize(axis_pred[:, :2])
-            axis_pred = torch.cat((axis_pred_norm, axis_pred[:, 2:]), dim=-1)
-            #pdb.set_trace()
-            src_axis_xyxys = axis_ops.line_angle_to_xyxy(axis_pred, center=axis_center)
-
-            
-            for j in range(keypoints_batch.shape[1]):
-                movable_pred = movable_preds[i, j].item()
-                rigid_pred = rigid_preds[i, j].item()
-                kinematic_pred = kinematic_preds[i, j].item()
-                action_pred = action_preds[i, j].item()
-
-                axis_pred = src_axis_xyxys[j]
-                if kinematic_imap[kinematic_pred] != 'rotation':
-                    axis_pred = [-1, -1, -1, -1]
-                # aff_pred = affordance_preds[i, j].cpu().numpy().tolist()
-                # aff_pred[0] = int(aff_pred[0] * cfg.data.image_size[1])
-                # aff_pred[1] = int(aff_pred[1] * cfg.data.image_size[0])
-
-                pred_entry = {
-                    'keypoint': keypoints_batch[i, j].cpu().numpy().tolist(),
-                    'bbox': bbox_scaled[i, j].numpy().tolist(),
-                    'mask': mask_preds[i, j].cpu().numpy(),
-                    'affordance': None,
-                    'move': movable_imap[movable_pred],
-                    'rigid': rigid_imap[rigid_pred],
-                    'kinematic': kinematic_imap[kinematic_pred],
-                    'pull_or_push': action_imap[action_pred],
-                    'axis': axis_pred,
-                }
-
-                instances.append(pred_entry)
-
-        #pdb.set_trace()
-
-        for keypoint_i in range(grid_size):
-            instances_i = [instances[keypoint_i]]
-            if keypoint_i != 0 and instances_i[0]['move'] == 'fixture':
-                continue
-            
-            vis = Visualizer(rgb, scale=1.0)
-            vis.overlay_instances(instances_i)
-            kp_x = int(keypoints_grid[0, keypoint_i, 0].item())
-            kp_y = int(keypoints_grid[0, keypoint_i, 1].item())
-            
-            img_path = os.path.join(result_dir, '{:0>4}_{:0>4}.png'.format(int(kp_x), int(kp_y)))
-            #print(img_path)
-            vis.output.save(img_path)
-            Image.open(img_path).resize((256, 192)).save(img_path)
 
 
 @hydra.main(config_path=CONFIG_DIR, config_name="defaults", version_base='1.2')
@@ -1118,7 +661,7 @@ def main(cfg: DictConfig):
     batch_size = cfg.train.batch_size
 
 
-    train_dataset, val_dataset, test_dataset = get_monoarti_datasets(
+    train_dataset, val_dataset, test_dataset = get_interaction_datasets(
         train_dataset_names=cfg.data.train_dataset_names,
         val_dataset_names=cfg.data.val_dataset_names,
         test_dataset_names=cfg.data.test_dataset_names,
@@ -1176,12 +719,8 @@ def main(cfg: DictConfig):
 
     if cfg.test.mode == 'export_imgs':
         export_imgs(cfg, val_dataloader, model, stats, export_dir, device)
-    elif cfg.test.mode == 'export_wall':
-        export_wall(cfg, val_dataloader, model, stats, export_dir, device)
-    elif cfg.test.mode == "export_interactive":
-        export_interactive(cfg, val_dataloader, model, export_dir, device)
-    elif cfg.test.mode == "export_teaser":
-        export_teaser(cfg, val_dataloader, model, stats, export_dir, device)
+    elif cfg.test.mode == "export_video":
+        export_video(cfg, val_dataloader, model, stats, export_dir, device)
     else:
         raise NotImplementedError
 
