@@ -2,8 +2,8 @@
 
 Code release for our paper
 
-**Understanding 3D Object Interaction from a Single Image**
-[Shengyi Qian][sq], [David F. Fouhey][dff]
+**Understanding 3D Object Interaction from a Single Image**  
+[Shengyi Qian][sq], [David F. Fouhey][dff]  
 ICCV 2023
 
 [[`Project Page`](https://jasonqsy.github.io/3DOI/)]  [[`arXiv`](https://arxiv.org/abs/2305.09664)] [[`demo`](https://huggingface.co/spaces/shengyi-qian/3DOI)]
