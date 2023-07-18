@@ -60,7 +60,16 @@ If necessary, download our [pretrained SAM model](https://fouheylab.eecs.umich.e
 
 ## Dataset
 
-I haven't had enough time to release the 3D Object Interaction dataset officially. Please feel free to email syqian@umich.edu if you want to use it in your project.
+The dataset is released in the [project page](https://jasonqsy.github.io/3DOI/). Please download and set the dataset root [here](https://github.com/JasonQSY/3DOI/blob/main/monoarti/monoarti/dataset.py#L19).
+
+The dataset should be organized like this
+
+```
+- `3doi_data`
+    - `3doi_v1`
+    - `images`
+    - `omnidata_filtered`
+```
 
 ## Inference
 
